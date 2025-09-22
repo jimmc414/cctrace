@@ -93,11 +93,15 @@ def identify_current_session(sessions, project_dir):
 
 def find_project_sessions(project_path):
     """Find all JSONL session files for the current project."""
+    project_path = str(project_path)
     # Convert project path to Claude's directory naming convention
-    project_dir_name = project_path.replace('/', '-')
+    # Claude normalizes project directories by replacing path separators AND dots
+    # in the working directory path with hyphens (see issue #4).
+    normalized_project_path = project_path.replace('\\', '/')
+    project_dir_name = normalized_project_path.replace('/', '-').replace('.', '-')
     if project_dir_name.startswith('-'):
         project_dir_name = project_dir_name[1:]
-    
+
     claude_project_dir = Path.home() / '.claude' / 'projects' / f'-{project_dir_name}'
     
     if not claude_project_dir.exists():
