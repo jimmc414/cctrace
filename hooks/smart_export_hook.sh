@@ -33,8 +33,10 @@ echo "$EXPORT_OUTPUT" >> "$LOG_FILE"
 
 # Parse statistics from export output
 if [ $EXPORT_RESULT -eq 0 ]; then
-    # Extract message count from output
-    MESSAGE_COUNT=$(echo "$EXPORT_OUTPUT" | grep -oP "Total Messages: \K\d+" || echo "0")
+    # Extract message count from output (portable sed instead of grep -P)
+    MESSAGE_COUNT=$(echo "$EXPORT_OUTPUT" | sed -n 's/.*Total Messages: \([0-9]*\).*/\1/p' | head -1 || echo "0")
+    # Fallback to 0 if empty
+    MESSAGE_COUNT=${MESSAGE_COUNT:-0}
     
     echo "" >> "$LOG_FILE"
     echo "Message count: $MESSAGE_COUNT" >> "$LOG_FILE"
@@ -43,9 +45,9 @@ if [ $EXPORT_RESULT -eq 0 ]; then
     if [ "$MESSAGE_COUNT" -lt "$MIN_MESSAGES" ]; then
         echo "⚠️  Session too short ($MESSAGE_COUNT messages < $MIN_MESSAGES required)" >> "$LOG_FILE"
         echo "🗑️  Removing export..." >> "$LOG_FILE"
-        
-        # Find and remove the export directory
-        EXPORT_DIR=$(echo "$EXPORT_OUTPUT" | grep -oP "Exported to: \K.*" || echo "")
+
+        # Find and remove the export directory (portable sed instead of grep -P)
+        EXPORT_DIR=$(echo "$EXPORT_OUTPUT" | sed -n 's/.*Exported to: \(.*\)/\1/p' | head -1 || echo "")
         if [ -n "$EXPORT_DIR" ] && [ -d "$EXPORT_DIR" ]; then
             rm -rf "$EXPORT_DIR"
             echo "✅ Short session export removed" >> "$LOG_FILE"

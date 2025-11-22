@@ -21,9 +21,17 @@ A command-line tool that exports Claude Code chat sessions with conversation his
 
 ## Requirements
 
-- Python > 3.6
+- Python 3.6 or higher
 - Claude Code running on Linux or WSL
 - Access to `~/.claude/projects/` directory
+
+### Optional Dependencies
+
+- **jq** - Required for hook scripts to parse Claude environment variables
+  - Install on Ubuntu/Debian: `sudo apt-get install jq`
+  - Install on macOS: `brew install jq`
+- **pytest** - Required only for running unit tests
+  - Install: `pip install pytest` or `pip install -r requirements.txt`
 
 ## Quick Start
 
@@ -324,12 +332,30 @@ The tool handles multiple Claude Code sessions running in the same directory by:
 - If a session appears stale, try sending a message to trigger an update
 
 
-### Development
+## Development
 
-The tool uses only Python standard library modules, making it dependency-free and easy to deploy.
+The tool uses only Python standard library modules for core functionality, making it dependency-free for basic usage.
 
-Key functions:
+### Running Tests
+
+To run the test suite:
+```bash
+# Install test dependencies
+pip install -r requirements.txt
+
+# Run tests
+python3 -m pytest tests/
+```
+
+### Key Functions
+
 - `get_parent_claude_pid()`: Detects if running inside Claude Code
 - `identify_current_session()`: Correlates process with session file
 - `parse_jsonl_file()`: Extracts and processes conversation data
 - `format_message_markdown()`: Converts messages to readable format
+
+### Platform Compatibility
+
+- **Linux**: Fully supported
+- **WSL (Windows Subsystem for Linux)**: Fully supported
+- **macOS**: Core functionality works; hook scripts require `jq` installation

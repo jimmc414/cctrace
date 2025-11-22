@@ -1,6 +1,6 @@
 # Claude Code Session Export Tool - Requirements
-# This tool uses only Python standard library modules
-# No external dependencies required!
+# This tool uses only Python standard library modules for core functionality
+# No external dependencies required for basic usage!
 
 # Python 3.6+ is required for:
 # - f-strings
@@ -18,6 +18,12 @@
 # - pathlib
 # - subprocess
 # - time
+# - xml.etree.ElementTree
+# - xml.dom.minidom
+# - re
+
+# Development dependencies (for running tests)
+pytest>=7.0.0  # Required for running unit tests
 
 # Optional: For future enhancements
 # rich>=10.0.0  # For better terminal output (not currently used)

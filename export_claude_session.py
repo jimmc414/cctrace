@@ -6,8 +6,16 @@ Exports the current Claude Code session to a verbose output folder.
 Automatically detects the active session based on recent modifications.
 """
 
-import os
 import sys
+
+# Check Python version before importing other modules
+if sys.version_info < (3, 6):
+    print("Error: This tool requires Python 3.6 or higher")
+    print(f"You are running Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+    print("Please upgrade your Python installation")
+    sys.exit(1)
+
+import os
 import json
 import shutil
 import argparse
@@ -79,15 +87,23 @@ def identify_current_session(sessions, project_dir):
             if current_mtime > marker_mtime:
                 print(f"✓ Session {session['session_id'][:8]}... was modified after marker creation")
                 # Clean up marker
-                marker_file.unlink(missing_ok=True)
+                try:
+                    marker_file.unlink()
+                except FileNotFoundError:
+                    pass
                 return session
-        
+
         # Clean up marker
-        marker_file.unlink(missing_ok=True)
+        try:
+            marker_file.unlink()
+        except FileNotFoundError:
+            pass
     except Exception as e:
         print(f"⚠️  Session identification failed: {e}")
-        if marker_file.exists():
-            marker_file.unlink(missing_ok=True)
+        try:
+            marker_file.unlink()
+        except FileNotFoundError:
+            pass
     
     return None
 
