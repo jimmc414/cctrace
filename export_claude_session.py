@@ -95,15 +95,25 @@ def find_project_sessions(project_path):
     """Find all JSONL session files for the current project."""
     project_path = str(project_path)
     # Convert project path to Claude's directory naming convention
-    # Claude normalizes project directories by replacing path separators AND dots
-    # in the working directory path with hyphens (see issue #4).
-    normalized_project_path = project_path.replace('\\', '/')
-    project_dir_name = normalized_project_path.replace('/', '-').replace('.', '-')
-    if project_dir_name.startswith('-'):
-        project_dir_name = project_dir_name[1:]
+    # Claude normalizes project directories by replacing special characters with hyphens.
+    # Define mapping rules as a dictionary for easy maintenance and extension.
+    normalization_rules = {
+        '\\': '/',  # Windows path separators to Unix
+        '/': '-',   # Path separators to hyphens
+        '.': '-',   # Dots to hyphens
+        '_': '-'    # Underscores to hyphens
+    }
+
+    # Apply normalization rules in order
+    normalized_project_path = project_path
+    for old_char, new_char in normalization_rules.items():
+        normalized_project_path = normalized_project_path.replace(old_char, new_char)
+
+    # Remove leading hyphen if present
+    project_dir_name = normalized_project_path.lstrip('-')
 
     claude_project_dir = Path.home() / '.claude' / 'projects' / f'-{project_dir_name}'
-    
+    print(claude_project_dir)
     if not claude_project_dir.exists():
         return []
     
