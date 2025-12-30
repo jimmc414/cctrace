@@ -97,12 +97,26 @@ def find_project_sessions(project_path):
     # Convert project path to Claude's directory naming convention
     # Claude normalizes project directories by replacing path separators AND dots
     # in the working directory path with hyphens (see issue #4).
-    normalized_project_path = project_path.replace('\\', '/')
-    project_dir_name = normalized_project_path.replace('/', '-').replace('.', '-')
+
+    # On Windows, paths include drive letters with colons (e.g., C:\, D:\)
+    # that must be normalized differently than Unix paths
+    if os.name == 'nt':  # Windows
+        # Replace backslashes, colons, forward slashes, and dots with hyphens
+        project_dir_name = project_path.replace('\\', '-').replace(':', '-').replace('/', '-').replace('.', '-')
+    else:  # Unix-like (Linux, macOS)
+        # Standard normalization for Unix paths
+        normalized_project_path = project_path.replace('\\', '/')
+        project_dir_name = normalized_project_path.replace('/', '-').replace('.', '-')
+
     if project_dir_name.startswith('-'):
         project_dir_name = project_dir_name[1:]
 
-    claude_project_dir = Path.home() / '.claude' / 'projects' / f'-{project_dir_name}'
+    claude_project_dir = Path.home() / '.claude' / 'projects'
+
+    if os.name == 'nt':  # Windows
+        claude_project_dir = claude_project_dir / project_dir_name
+    else: # Unix-like (Linux, macOS)
+        claude_project_dir = claude_project_dir / f'-{project_dir_name}'
     
     if not claude_project_dir.exists():
         return []
