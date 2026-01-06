@@ -1,0 +1,57 @@
+{
+  "cctrace_version": "2.0.0",
+  "export_timestamp": "2026-01-06T10:52:28.579269Z",
+  "session_id": "132b2f66-ee5f-46f6-8904-32d9dc4d36c3",
+  "session_slug": "hazy-enchanting-piglet",
+  "export_name": "phase0-investigation",
+  "claude_code_version": "2.0.76",
+  "original_context": {
+    "user": "jim",
+    "platform": "linux",
+    "repo_path": "/mnt/c/python/cctrace",
+    "git_branch": "master"
+  },
+  "session_data": {
+    "main_session": "session/main.jsonl",
+    "agent_sessions": [],
+    "file_history": [
+      "session/file-history/a3babdc5c21e2312@v4",
+      "session/file-history/5dab3267331eb910@v1",
+      "session/file-history/a3babdc5c21e2312@v3",
+      "session/file-history/5dab3267331eb910@v2",
+      "session/file-history/4012f09169c4a3b7@v2",
+      "session/file-history/9c2f5285f0921bf3@v1",
+      "session/file-history/a3babdc5c21e2312@v1",
+      "session/file-history/9c2f5285f0921bf3@v2",
+      "session/file-history/adf0997ba3efa6cb@v1",
+      "session/file-history/a3babdc5c21e2312@v2",
+      "session/file-history/aade9f275e5f8114@v1",
+      "session/file-history/adf0997ba3efa6cb@v2",
+      "session/file-history/adf0997ba3efa6cb@v3"
+    ],
+    "plan_file": "session/plan.md",
+    "todos": "session/todos.json",
+    "session_env": null
+  },
+  "config_snapshot": {
+    "commands": [
+      "config/commands/export.md"
+    ],
+    "skills": [],
+    "hooks": [],
+    "agents": [],
+    "rules": [],
+    "settings": null,
+    "claude_md": null
+  },
+  "statistics": {
+    "message_count": 536,
+    "user_messages": 170,
+    "assistant_messages": 326,
+    "tool_uses": 152,
+    "duration_seconds": 5788,
+    "models_used": [
+      "claude-opus-4-5-20251101"
+    ]
+  }
+}

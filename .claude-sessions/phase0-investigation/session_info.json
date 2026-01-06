@@ -1,0 +1,13 @@
+{
+  "session_id": "132b2f66-ee5f-46f6-8904-32d9dc4d36c3",
+  "start_time": "2026-01-06T09:15:59.901Z",
+  "end_time": "2026-01-06T10:52:28.014Z",
+  "project_dir": "/mnt/c/python/cctrace",
+  "total_messages": 536,
+  "user_messages": 170,
+  "assistant_messages": 326,
+  "tool_uses": 152,
+  "models_used": [
+    "claude-opus-4-5-20251101"
+  ]
+}

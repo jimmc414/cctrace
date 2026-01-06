@@ -1,0 +1,433 @@
+# Implementation Plan: Portable Claude Code Sessions
+
+Based on Phase 0 investigation findings, this document outlines the implementation approach.
+
+---
+
+## Overview
+
+### Current State
+- `export_claude_session.py` (634 lines) handles session export
+- Outputs to `~/claude_sessions/exports/` with raw JSONL, markdown, XML
+- No import functionality
+- No manifest generation
+- No config export
+
+### Target State
+- Export to `.claude-sessions/<name>/` in project repo
+- Generate `.cctrace-manifest.json` for validation
+- Generate `RENDERED.md` for GitHub viewing
+- Import functionality with session ID regeneration
+- Backup/restore capability
+
+---
+
+## Phase 1a: Enhanced Export
+
+### 1a.1 Modify Export Location
+
+**File:** `export_claude_session.py`
+
+**Changes:**
+```python
+# Current: Export to ~/claude_sessions/exports/
+# New: Export to .claude-sessions/<name>/ in project root
+
+def get_export_path(project_dir: Path, export_name: str) -> Path:
+    return project_dir / '.claude-sessions' / export_name
+```
+
+**Test Strategy:**
+- Unit test: Verify export creates directory in project root
+- Integration test: Verify export contains all required files
+
+### 1a.2 Generate Manifest
+
+**New Function:**
+```python
+def generate_manifest(
+    session_id: str,
+    export_name: str,
+    session_file: Path,
+    claude_code_version: str,
+    anonymized: bool = False
+) -> dict:
+    return {
+        "cctrace_version": "2.0.0",
+        "export_timestamp": datetime.utcnow().isoformat() + "Z",
+        "session_id": session_id,
+        "session_folder_name": export_name,
+        "claude_code_version": claude_code_version,
+        "files_included": [...],
+        "original_user": getpass.getuser() if not anonymized else None,
+        "original_platform": sys.platform,
+        "original_repo_path": str(Path.cwd()),
+        "anonymized": anonymized
+    }
+```
+
+**Test Strategy:**
+- Unit test: Verify manifest has all required fields
+- Unit test: Verify anonymization removes user info
+
+### 1a.3 Generate RENDERED.md
+
+**New Function:**
+```python
+def generate_rendered_markdown(messages: list, metadata: dict) -> str:
+    # Header with session info
+    # Conversation with user/assistant distinction
+    # Collapsible thinking blocks
+    # Tool invocations and results
+    # Timestamps per turn
+```
+
+**Format:**
+```markdown
+# Claude Code Session: {export_name}
+
+> Exported from cctrace v2.0.0
+
+## Session Info
+| Field | Value |
+|-------|-------|
+| Session ID | `{session_id}` |
+| Duration | {duration} |
+| Messages | {count} |
+| Model | {model} |
+
+---
+
+## Conversation
+
+### 👤 User (2026-01-06 09:15:14)
+{user_message}
+
+### 🤖 Assistant (2026-01-06 09:15:24)
+<details>
+<summary>💭 Thinking</summary>
+{thinking_block}
+</details>
+
+{response_text}
+```
+
+**Test Strategy:**
+- Unit test: Verify markdown renders correctly
+- Manual test: View on GitHub to confirm rendering
+
+### 1a.4 Export Workflow Updates
+
+**User Prompts:**
+1. Export name prompt (if not provided)
+2. Authorship anonymization option
+3. Confirmation with file summary
+
+**CLI Options:**
+```
+--export-name NAME     Name for export folder
+--anonymize            Exclude user/machine info
+--no-render            Skip RENDERED.md generation
+```
+
+### 1a.5 Existing Code Changes
+
+| Current | Change | Reason |
+|---------|--------|--------|
+| `export_session()` | Add manifest and RENDERED.md generation | New requirements |
+| Output path | Configurable between old and new locations | Backward compatibility |
+| `format_message_markdown()` | Refactor for RENDERED.md | Reuse existing |
+
+---
+
+## Phase 1b: Import Tool
+
+### 1b.1 New File: `import_session.py`
+
+**Structure:**
+```python
+#!/usr/bin/env python3
+"""Import a cctrace session export into Claude Code."""
+
+def validate_manifest(export_path: Path) -> dict:
+    """Validate .cctrace-manifest.json exists and is valid."""
+
+def check_version_compatibility(manifest: dict) -> bool:
+    """Check Claude Code version compatibility."""
+
+def generate_new_session_id() -> str:
+    """Generate new UUID for imported session."""
+
+def regenerate_message_uuids(messages: list) -> list:
+    """Regenerate all UUIDs while maintaining parent references."""
+
+def get_target_path(project_dir: Path) -> Path:
+    """Get ~/.claude/projects/<normalized-path>/"""
+
+def create_snapshot(target_dir: Path, snapshot_dir: Path) -> None:
+    """Create pre-import backup."""
+
+def write_session_file(messages: list, target_path: Path) -> None:
+    """Write session JSONL to target location."""
+
+def add_claude_md_note(project_dir: Path, manifest: dict) -> None:
+    """Add import context to CLAUDE.md."""
+
+def import_session(export_path: Path, options: dict) -> None:
+    """Main import orchestrator."""
+```
+
+### 1b.2 Import Flow
+
+```
+1. Validate manifest
+   └── Missing? → Abort with error
+   └── Invalid? → Abort with error
+
+2. Check version compatibility
+   └── Mismatch? → Warn, prompt continue/abort
+
+3. Check for conflicts
+   └── Session ID exists? → Abort or use new ID
+   └── Target file exists? → Abort
+
+4. Create pre-import snapshot
+   └── Copy target directory to snapshot location
+
+5. Read and process session
+   └── Parse JSONL
+   └── Generate new session ID (default)
+   └── Regenerate message UUIDs
+
+6. Write session file
+   └── Create target directory if needed
+   └── Write processed JSONL
+
+7. Add CLAUDE.md note
+   └── Append import context section
+
+8. Log import
+   └── Write to ~/.claude-session-imports/<timestamp>/import.log
+   └── Update index.json
+```
+
+### 1b.3 CLI Interface
+
+```
+usage: import_session.py [-h] [--preserve-session-id] [--non-interactive]
+                         export_path
+
+positional arguments:
+  export_path           Path to .claude-sessions/<name>/ directory
+
+optional arguments:
+  --preserve-session-id Keep original session ID (fails on conflict)
+  --non-interactive     No prompts, use defaults
+```
+
+### 1b.4 Test Strategy
+
+| Test | Type | Description |
+|------|------|-------------|
+| Manifest validation | Unit | Missing/invalid manifest detection |
+| UUID regeneration | Unit | All UUIDs updated, parent refs maintained |
+| Conflict detection | Unit | Session ID and file conflicts |
+| Snapshot creation | Integration | Backup created before write |
+| Full import | Integration | End-to-end import works |
+| Resume test | Manual | User verifies `/continue` works |
+
+---
+
+## Phase 1c: Restore Functionality
+
+### 1c.1 New File: `restore_backup.py`
+
+**Functions:**
+```python
+def get_snapshot_info() -> dict:
+    """Get info about current pre-import snapshot."""
+
+def restore_snapshot(confirm: bool = False) -> None:
+    """Restore from pre-import snapshot."""
+```
+
+### 1c.2 CLI Interface
+
+```
+usage: restore_backup.py [-h]
+
+Restore Claude Code session storage to pre-import state.
+
+optional arguments:
+  --yes    Skip confirmation prompt (DANGEROUS)
+```
+
+### 1c.3 Safety Features
+
+1. **Confirmation required:** Must type "RESTORE" to proceed
+2. **Show what will be lost:** Display timestamp of snapshot
+3. **Cannot undo:** Clear warning that restore is destructive
+
+---
+
+## Phase 1d: Config Export (Optional)
+
+### 1d.1 Export .claude/ Directory
+
+**Included:**
+- `.claude/commands/`
+- `.claude/skills/`
+- `.claude/agents/`
+- `.claude/rules/`
+- `.claude/settings.json`
+- `CLAUDE.md` (project root)
+
+**Excluded:**
+- `.claude/settings.local.json`
+- Any files in `.gitignore`
+
+### 1d.2 Implementation
+
+Add to export process:
+```python
+def export_config(project_dir: Path, export_dir: Path) -> list:
+    """Copy .claude/ contents to export."""
+    config_items = ['commands', 'skills', 'agents', 'rules', 'settings.json']
+    # Copy each item that exists
+    # Return list of files copied
+```
+
+---
+
+## File Structure After Implementation
+
+```
+cctrace/
+├── export_claude_session.py   # Enhanced with manifest, RENDERED.md
+├── import_session.py          # NEW: Import functionality
+├── restore_backup.py          # NEW: Restore functionality
+├── common/                    # NEW: Shared utilities
+│   ├── __init__.py
+│   ├── manifest.py            # Manifest generation/validation
+│   ├── paths.py               # Path normalization utilities
+│   └── uuids.py               # UUID generation/regeneration
+├── commands/
+│   ├── export.md              # Existing slash command
+│   └── import.md              # NEW: Import slash command
+├── docs/
+│   ├── investigation-findings.md
+│   ├── technical-requirements.md
+│   └── implementation-plan.md
+└── tests/
+    ├── test_export.py         # Enhanced export tests
+    ├── test_import.py         # NEW: Import tests
+    ├── test_manifest.py       # NEW: Manifest tests
+    └── test_restore.py        # NEW: Restore tests
+```
+
+---
+
+## Implementation Order
+
+### Sprint 1: Export Enhancements
+1. Create `common/` module with shared utilities
+2. Add manifest generation to export
+3. Add RENDERED.md generation to export
+4. Add new CLI options (--export-name, --anonymize)
+5. Tests for manifest and rendering
+
+### Sprint 2: Import Core
+1. Create `import_session.py` skeleton
+2. Implement manifest validation
+3. Implement UUID regeneration
+4. Implement session file writing
+5. Implement CLAUDE.md note
+6. Unit tests for each function
+
+### Sprint 3: Import Safety
+1. Implement pre-import snapshot
+2. Implement conflict detection
+3. Implement import logging
+4. Create `restore_backup.py`
+5. Integration tests
+
+### Sprint 4: Polish
+1. Slash commands for import/restore
+2. Non-interactive mode
+3. Error message review
+4. Documentation updates
+5. End-to-end testing
+
+---
+
+## Risk Mitigation
+
+| Risk | Mitigation |
+|------|------------|
+| Thinking signature validation | Don't modify thinking text; preserve exactly |
+| UUID reference breaks | Comprehensive UUID mapping during regeneration |
+| Path handling errors | Phase 1 keeps paths as-is; CLAUDE.md note for context |
+| Import corrupts Claude Code | Pre-import snapshot with restore capability |
+| Version incompatibility | Version check with user warning |
+
+---
+
+## Testing Requirements
+
+### Unit Tests
+- [ ] Manifest generation with all fields
+- [ ] Manifest validation (missing fields, invalid types)
+- [ ] UUID regeneration with parent reference updates
+- [ ] Path normalization for Unix/Windows
+- [ ] RENDERED.md formatting
+
+### Integration Tests
+- [ ] Full export creates all required files
+- [ ] Full import places session correctly
+- [ ] Snapshot creation and restore
+- [ ] Import logging
+
+### Manual Tests
+- [ ] Export renders correctly on GitHub
+- [ ] Imported session appears in Claude Code
+- [ ] `/continue` works on imported session
+- [ ] Cross-user import (different username)
+- [ ] Restore after import
+
+---
+
+## Dependencies
+
+**No new external dependencies.** Continue using Python standard library only:
+- `pathlib` - Path operations
+- `json` - JSON handling
+- `uuid` - UUID generation
+- `datetime` - Timestamps
+- `shutil` - File operations
+- `getpass` - Username
+- `sys` - Platform info
+- `argparse` - CLI parsing
+
+---
+
+## Backward Compatibility
+
+| Feature | Compatibility |
+|---------|---------------|
+| Existing exports | Continue to work (different output location) |
+| Old CLI options | Preserved (--format, --output-dir, etc.) |
+| Slash command | `/export` continues to work |
+| No manifest exports | Cannot be imported (require manifest) |
+
+---
+
+## Success Criteria
+
+Phase 1 complete when:
+1. ✅ Export creates `.claude-sessions/<name>/` with manifest and RENDERED.md
+2. ✅ RENDERED.md displays correctly on GitHub
+3. ✅ Import places session in `~/.claude/projects/<path>/`
+4. ✅ Imported session appears in Claude Code
+5. ✅ `/continue` works on imported session (user verification)
+6. ✅ Pre-import snapshot can be restored
+7. ✅ No data loss on import (never overwrites existing)

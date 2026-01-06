@@ -1,0 +1,16 @@
+Claude Code Session Summary
+==========================
+
+Session ID: 132b2f66-ee5f-46f6-8904-32d9dc4d36c3
+Export Time: 2026-01-06 04:52:28
+Project Directory: /mnt/c/python/cctrace
+Duration: 2026-01-06T09:15:59.901Z to 2026-01-06T10:52:28.014Z
+
+Statistics:
+- Total Messages: 536
+- User Messages: 170
+- Assistant Messages: 326
+- Tool Uses: 152
+- Models: claude-opus-4-5-20251101
+
+Exported to: /mnt/c/python/cctrace/.claude-sessions/phase0-investigation

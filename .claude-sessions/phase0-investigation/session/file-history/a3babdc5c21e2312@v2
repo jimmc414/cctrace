@@ -1,0 +1,521 @@
+# Phase 0 Investigation Findings: Portable Claude Code Sessions
+
+**Investigation Date:** 2026-01-06
+**Investigator:** Claude (Opus 4.5)
+**cctrace Version:** Current (commit b399edc)
+
+---
+
+## Executive Summary
+
+Session import/resume is **FEASIBLE** with the following key findings:
+
+1. **JSONL files are the primary session storage** - SQLite database is not required
+2. **File presence enables discovery** - placing JSONL in correct directory is sufficient
+3. **Thinking block signatures exist** - content should not be modified
+4. **Path conversion is optional** - Claude Code adapts to current working directory
+
+---
+
+## 1. Session Storage Discovery
+
+### 1.1 Primary Session Location
+
+Sessions are stored in `~/.claude/projects/<normalized-project-path>/`:
+
+```
+~/.claude/projects/
+├── -mnt-c-python-cctrace/           # Project: /mnt/c/python/cctrace
+│   ├── agent-a02c6c6.jsonl          # Session file (agent ID naming)
+│   ├── 132b2f66-ee5f-46f6-8904-32d9dc4d36c3.jsonl  # UUID naming
+│   └── ...
+├── -mnt-c-python-kosmos/            # Another project
+└── ...
+```
+
+### 1.2 Path Normalization Rules
+
+| Original Path | Normalized Directory |
+|---------------|---------------------|
+| `/mnt/c/python/cctrace` | `-mnt-c-python-cctrace` |
+| `/home/user/project` | `-home-user-project` |
+| `C:\Users\name\project` (Windows) | `C-Users-name-project` |
+
+**Rules:**
+- Forward slashes (`/`) → hyphens (`-`)
+- Backslashes (`\`) → hyphens (`-`)
+- Colons (`:`) → hyphens (`-`)
+- Dots (`.`) → hyphens (`-`)
+- Unix paths: prefixed with `-`
+- Windows paths: no prefix (start with drive letter)
+
+### 1.3 Complete Session Storage Structure
+
+```
+~/.claude/
+├── projects/              # [419MB] Session JSONL files - PRIMARY
+├── file-history/          # [29MB]  Versioned file snapshots by session UUID
+├── session-env/           # [256KB] Session environment data by UUID
+├── todos/                 # [7.7MB] Task tracking per session
+├── plans/                 # [588KB] Plan files (slug-named)
+├── __store.db             # [2.2MB] SQLite database (NOT REQUIRED)
+├── history.jsonl          # [1.9MB] Command history (not session data)
+├── commands/              # Custom slash commands
+├── skills/                # Custom skills
+├── agents/                # Custom agents
+├── rules/                 # Custom rules
+├── settings.json          # Global settings
+└── .credentials.json      # OAuth credentials (NEVER EXPORT)
+```
+
+### 1.4 Session Registry/Index
+
+**Finding: NO central registry required.**
+
+The SQLite database (`__store.db`) contains:
+- `base_messages` - Message metadata
+- `assistant_messages` - Response details
+- `user_messages` - User message content
+- `conversation_summaries` - Summaries
+
+**Critical Discovery:** Sessions exist and function WITHOUT database entries. Current active sessions (including this one) have no database records. The database appears to be:
+- Legacy/deprecated, OR
+- Used only for specific features (summaries), OR
+- Populated asynchronously
+
+**Implication for Import:** Database entries are NOT required. JSONL file presence is sufficient.
+
+### 1.5 Machine/User Identifiers
+
+| Field | Value | Tied to Machine? |
+|-------|-------|------------------|
+| `cwd` | `/mnt/c/python/cctrace` | YES - absolute path |
+| `sessionId` | UUID | NO - random |
+| `agentId` | `a02c6c6` | NO - random short ID |
+| `slug` | `hazy-enchanting-piglet` | NO - random name |
+| `version` | `2.0.76` | NO - Claude Code version |
+
+**No machine-specific identifiers** beyond the `cwd` path.
+
+---
+
+## 2. Session Format Analysis
+
+### 2.1 JSONL Structure
+
+Each line is one JSON object. Message types:
+
+#### Type 1: File History Snapshot
+```json
+{
+  "type": "file-history-snapshot",
+  "messageId": "UUID",
+  "snapshot": {
+    "messageId": "UUID",
+    "trackedFileBackups": {},
+    "timestamp": "ISO-8601"
+  },
+  "isSnapshotUpdate": boolean
+}
+```
+
+#### Type 2: User Message
+```json
+{
+  "parentUuid": "UUID|null",
+  "isSidechain": boolean,
+  "userType": "external",
+  "cwd": "/path/to/project",          // FILE PATH
+  "sessionId": "UUID",
+  "version": "2.0.76",
+  "gitBranch": "master",
+  "agentId": "a02c6c6",
+  "slug": "human-readable-name",
+  "type": "user",
+  "message": {
+    "role": "user",
+    "content": "text" | [{...}]
+  },
+  "uuid": "UUID",
+  "timestamp": "ISO-8601",
+  "thinkingMetadata": {...},
+  "todos": []
+}
+```
+
+#### Type 3: Assistant Message
+```json
+{
+  "parentUuid": "UUID",
+  "isSidechain": boolean,
+  "userType": "external",
+  "cwd": "/path/to/project",          // FILE PATH
+  "sessionId": "UUID",
+  "version": "2.0.76",
+  "gitBranch": "master",
+  "agentId": "a02c6c6",
+  "slug": "human-readable-name",
+  "message": {
+    "model": "claude-opus-4-5-20251101",
+    "id": "msg_01...",                // ANTHROPIC ID - DO NOT MODIFY
+    "type": "message",
+    "role": "assistant",
+    "content": [{...}],               // Content blocks
+    "stop_reason": "end_turn"|null,
+    "usage": {
+      "input_tokens": 3315,
+      "output_tokens": 100,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    }
+  },
+  "requestId": "req_01...",           // ANTHROPIC ID - DO NOT MODIFY
+  "type": "assistant",
+  "uuid": "UUID",
+  "timestamp": "ISO-8601"
+}
+```
+
+### 2.2 Content Block Types
+
+#### Thinking Block (SIGNED)
+```json
+{
+  "type": "thinking",
+  "thinking": "Claude's internal reasoning...",
+  "signature": "EoIGCkYICxgC..."      // CRYPTOGRAPHIC - DO NOT MODIFY
+}
+```
+
+#### Text Block
+```json
+{
+  "type": "text",
+  "text": "Claude's response..."
+}
+```
+
+#### Tool Use (Contains FILE PATHS)
+```json
+{
+  "type": "tool_use",
+  "id": "toolu_01...",                // DO NOT MODIFY
+  "name": "Read",
+  "input": {
+    "file_path": "/mnt/c/python/cctrace/README.md"  // FILE PATH
+  }
+}
+```
+
+#### Tool Result
+```json
+{
+  "type": "tool_result",
+  "tool_use_id": "toolu_01...",
+  "content": "File contents or command output..."
+}
+```
+
+### 2.3 Field Classification
+
+#### Fields Containing FILE PATHS (Critical for Import)
+| Location | Field | Example |
+|----------|-------|---------|
+| Top-level | `cwd` | `/mnt/c/python/cctrace` |
+| Tool use input | `file_path` | `/mnt/c/python/cctrace/src/main.py` |
+| Tool use input | `path` | `/mnt/c/python/cctrace/tests/` |
+| Tool result | `filePath` | `/mnt/c/python/cctrace/README.md` |
+| Text content | Embedded paths | `I read the file at /mnt/c/...` |
+
+#### Fields Containing UUIDs/Session IDs
+| Field | Purpose | Can Regenerate? |
+|-------|---------|-----------------|
+| `sessionId` | Session identifier | YES (recommended for import) |
+| `uuid` | Message identifier | YES (maintain internal consistency) |
+| `parentUuid` | Message threading | YES (update references) |
+| `agentId` | Short session ID | YES (can generate new) |
+
+#### Fields with Timestamps
+| Field | Purpose | Modify? |
+|-------|---------|---------|
+| `timestamp` | Message creation time | NO - historical record |
+| `snapshot.timestamp` | File snapshot time | NO - historical record |
+
+#### Signatures/Tokens (NEVER MODIFY)
+| Field | Purpose | Reason |
+|-------|---------|--------|
+| `message.id` | Anthropic message ID | Token tracking |
+| `requestId` | Anthropic request ID | Audit trail |
+| `signature` | Thinking block integrity | Cryptographic verification |
+| `tool_use.id` | Tool invocation ID | Result matching |
+
+---
+
+## 3. Session Resumption Testing
+
+### 3.1 Experiment Design
+
+Created test sessions by copying and modifying existing session:
+- **Source:** `~/.claude/projects/-mnt-c-python-cctrace/agent-ad24572.jsonl`
+- **Target:** `~/.claude/projects/-mnt-c-python-test-import-session/`
+
+### 3.2 Experiment Results
+
+| Experiment | Modification | Result | Notes |
+|------------|--------------|--------|-------|
+| 1. Copy as-is | None | ✅ PASS | Session discovered and parseable |
+| 2. Modify cwd | `/mnt/c/python/cctrace` → `/mnt/c/python/test-import-session` | ✅ PASS | Session discovered |
+| 3. Change sessionId | Original UUID → `aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee` | ✅ PASS | Session discovered |
+| 4. Modify thinking | Added "MODIFIED:" prefix to thinking text | ✅ PASS* | *Export works, runtime signature validation untested |
+
+### 3.3 Key Findings
+
+1. **Session discovery is file-based** - placing JSONL in correct directory enables discovery
+2. **File naming is flexible** - doesn't require UUID or `agent-*` format
+3. **Database entries NOT required** - sessions work without `__store.db` records
+4. **Export/parse works** - cctrace successfully exported all test sessions
+5. **Signature validation status unknown** - couldn't test Claude Code runtime validation
+
+### 3.4 Minimum Viable Import
+
+To import a session:
+1. Create target project directory
+2. Create `~/.claude/projects/<normalized-path>/`
+3. Copy session JSONL file
+4. (Optional) Generate new sessionId to avoid conflicts
+5. Session should appear in Claude Code's `/continue` or session list
+
+### 3.5 User Verification Results ✅
+
+**CONFIRMED WORKING (2026-01-06):**
+- ✅ Copied session successfully resumes with `claude -r`
+- ✅ Full conversation context preserved
+- ✅ No database entries required
+- ✅ No history.jsonl entries required
+
+**Critical Discovery - Path Normalization:**
+Claude Code converts underscores to hyphens in path normalization:
+```
+/mnt/c/python/cctrace_test → -mnt-c-python-cctrace-test
+                      ^                            ^
+                 underscore                     hyphen
+```
+
+**Complete normalization rules:**
+- `/` → `-`
+- `\` → `-`
+- `:` → `-`
+- `.` → `-`
+- `_` → `-` (IMPORTANT: not documented in cctrace!)
+- Unix paths: prefix with `-`
+- Windows paths: no prefix
+
+---
+
+## 4. Configuration Discovery
+
+### 4.1 Project-Local Configuration (`.claude/`)
+
+```
+.claude/
+├── commands/           # Custom slash commands (*.md)
+├── hooks/              # Pre/post execution hooks
+├── skills/             # Custom skills
+├── agents/             # Custom agents
+├── rules/              # Custom rules (*.md)
+├── settings.json       # Project settings
+└── settings.local.json # Local overrides (git-ignored)
+```
+
+**Referenced in sessions?** NO - configuration files are not embedded in session JSONL.
+
+### 4.2 Global Configuration (`~/.claude/`)
+
+Same structure as project-local, plus:
+- `CLAUDE.md` - Global user instructions
+- `.credentials.json` - OAuth tokens (NEVER EXPORT)
+- `__store.db` - SQLite database
+- `history.jsonl` - Command history
+
+### 4.3 What to Export for Full Portability
+
+| Component | Export? | Reason |
+|-----------|---------|--------|
+| `.claude/commands/` | YES | Custom slash commands |
+| `.claude/skills/` | YES | Custom skills |
+| `.claude/agents/` | YES | Custom agent configs |
+| `.claude/hooks/` | OPTIONAL | May contain machine-specific paths |
+| `.claude/rules/` | YES | Project rules |
+| `.claude/settings.json` | YES | Project settings |
+| `.claude/settings.local.json` | NO | Local overrides |
+| `CLAUDE.md` | YES | Project context |
+| `~/.claude/.credentials.json` | NEVER | Security risk |
+| `~/.claude/CLAUDE.md` | NO | User-specific global config |
+
+---
+
+## 5. Existing cctrace Code Review
+
+### 5.1 Current Capabilities (`export_claude_session.py`)
+
+**Handles Well:**
+- Session discovery via path normalization
+- Cross-platform path handling (Windows/Unix)
+- Raw JSONL export with complete fidelity
+- Markdown and XML formatted output
+- Session metadata extraction
+- PID-based active session identification
+- Multiple active session handling
+
+**Output Files:**
+- `session_info.json` - Metadata
+- `raw_messages.jsonl` - Complete session copy
+- `conversation_full.md` - Human-readable markdown
+- `conversation_full.xml` - Structured XML
+- `summary.txt` - Quick stats
+
+### 5.2 Changes Needed for New Design
+
+| Current Behavior | Required Change |
+|------------------|-----------------|
+| Exports to `~/claude_sessions/exports/` | Export to `.claude-sessions/<name>/` in repo |
+| Raw JSONL only | Also generate `RENDERED.md` and `.cctrace-manifest.json` |
+| No manifest | Add manifest with validation fields |
+| No config export | Export `.claude/` directory contents |
+| No import | Implement import functionality |
+
+### 5.3 Assumptions to Address
+
+1. **Hardcoded paths:**
+   - `Path.home() / '.claude' / 'projects'` - Keep (correct)
+   - `Path.home() / 'claude_sessions' / 'exports'` - Change for in-repo export
+   - `Path.home() / '.claude' / 'commands'` - Keep for command installation
+
+2. **Tool result truncation:**
+   - Currently truncates at 5000 chars
+   - For raw export, should preserve complete data
+
+3. **Single session export:**
+   - May want to support exporting all sessions for a project
+
+---
+
+## 6. Feasibility Assessment
+
+### 6.1 Overall Assessment: FEASIBLE ✅ CONFIRMED
+
+Session import/resume is technically feasible. **User testing confirmed successful session resumption on 2026-01-06.**
+
+| Component | Feasibility | Confidence |
+|-----------|-------------|------------|
+| Export session JSONL | ✅ High | 100% - Already implemented |
+| Export config (.claude/) | ✅ High | 95% - Standard file copy |
+| Generate RENDERED.md | ✅ High | 95% - Markdown formatting |
+| Generate manifest | ✅ High | 100% - JSON generation |
+| Import session to new location | ✅ High | **100% - CONFIRMED WORKING** |
+| Resume imported session | ✅ High | **100% - CONFIRMED WORKING** |
+| Cross-user import | ✅ High | 90% - Path handling confirmed |
+| Cross-platform import | ⚠️ Medium | 70% - Path conversion complexity |
+
+### 6.2 Known Limitations
+
+1. **Thinking Block Signatures**
+   - Signed content cannot be modified
+   - If Claude Code validates signatures, tampered thinking blocks would fail
+   - **Mitigation:** Never modify thinking text; preserve exactly as exported
+
+2. **Path Dependencies**
+   - Absolute paths embedded throughout conversation
+   - Tool invocations reference original file locations
+   - **Mitigation:** Add CLAUDE.md note explaining path context (per objective.md)
+
+3. **Associated Data Loss**
+   - File history snapshots in `~/.claude/file-history/` not exported
+   - Session environment in `~/.claude/session-env/` not exported
+   - Todo data in `~/.claude/todos/` not exported
+   - **Impact:** Minor - core conversation is preserved
+
+4. **Version Compatibility**
+   - Session format may change between Claude Code versions
+   - No known migration path for old sessions
+   - **Mitigation:** Store version in manifest, warn on mismatch
+
+### 6.3 Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Signature validation fails | Medium | High | Don't modify thinking text |
+| Claude Code format changes | Medium | High | Version checking in manifest |
+| Path conversion errors | Low | Medium | CLAUDE.md context note |
+| Import breaks Claude Code | Low | High | Pre-import snapshot |
+
+### 6.4 Recommendations
+
+1. **Phase 1:** Implement export with manifest and RENDERED.md
+2. **Phase 1:** Implement import with new session ID generation
+3. **User Testing:** Have user verify `/continue` works on imported session
+4. **Phase 2:** Add interactive path conversion if users request it
+5. **Phase 2:** Add file-history/todos export if users request it
+
+---
+
+## Appendix A: Session File Examples
+
+### A.1 Small Session (3 messages, 4KB)
+
+```
+~/.claude/projects/-mnt-c-python-cctrace/agent-ad24572.jsonl
+```
+
+Contents: 1 user message, 2 assistant responses (thinking + text)
+
+### A.2 Large Session (many messages, 36MB)
+
+```
+~/.claude/projects/-mnt-c-python-claude-repo-xray/dced9bb5-2cbf-4594-96a1-091fb4ed10f1.jsonl
+```
+
+Long development session with extensive tool usage.
+
+---
+
+## Appendix B: Database Schema
+
+```sql
+CREATE TABLE base_messages (
+  uuid text PRIMARY KEY,
+  parent_uuid text REFERENCES base_messages(uuid),
+  session_id text NOT NULL,
+  timestamp integer NOT NULL,
+  message_type text NOT NULL,
+  cwd text NOT NULL,
+  user_type text NOT NULL,
+  version text NOT NULL,
+  isSidechain integer NOT NULL
+);
+
+CREATE TABLE assistant_messages (
+  uuid text PRIMARY KEY REFERENCES base_messages(uuid),
+  cost_usd real NOT NULL,
+  duration_ms integer NOT NULL,
+  message text NOT NULL,
+  is_api_error_message integer DEFAULT false NOT NULL,
+  timestamp integer NOT NULL,
+  model text DEFAULT '' NOT NULL
+);
+
+CREATE TABLE user_messages (
+  uuid text PRIMARY KEY REFERENCES base_messages(uuid),
+  message text NOT NULL,
+  tool_use_result text,
+  timestamp integer NOT NULL
+);
+
+CREATE TABLE conversation_summaries (
+  leaf_uuid text PRIMARY KEY REFERENCES base_messages(uuid),
+  summary text NOT NULL,
+  updated_at integer NOT NULL
+);
+```
+
+**Note:** Database entries are NOT required for session functionality.

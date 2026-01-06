@@ -97,3 +97,4 @@ venv
 # Claude Export folders
 claude_export_*/
 *.jsonl
+!.claude-sessions/**/*.jsonl
