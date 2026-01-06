@@ -1,335 +1,262 @@
-# Claude Code Trace
+# cctrace
 
-A command-line tool that exports Claude Code chat sessions with conversation history, internal reasoning blocks, tool usage, and comprehensive metadata in XML and in markdown.
+Export and import Claude Code sessions.
 
-## Features
+Claude Code stores conversation history in `~/.claude/projects/<normalized-path>/*.jsonl`. This tool extracts those sessions into portable formats for archival, analysis, or sharing.
 
-- **Automatic Session Detection**: Intelligently identifies your current Claude Code session, returns the session id, transcript and all session metadata, even with multiple concurrent sessions.
-- **Complete Export**: Captures all messages, thinking blocks, tool uses, and responses
-- **PID Cross Reference Validation**: Cross reference PID to ensure the correct session is exported
-- **Multiple Output Formats**: Generates Markdown, JSON, and raw JSONL files
-- **Session Statistics**: Provides detailed metrics about your conversation
-- **Slash Command Integration**: Export directly from Claude Code with `/export`
-- **Timestamped Archives**: Each export is saved with timestamp and session ID
-- **Auto-Copy to Working Directory**: Automatically copies export to your current directory (configurable)
+## What's New
 
-![image](https://github.com/user-attachments/assets/b316bd46-94f0-44ef-8030-e73b393cb119)
+**v2.0** adds portable sessions: export a session to your git repository, push it, and let someone else import it to continue where you left off. The original export functionality remains unchanged.
 
-![image](https://github.com/user-attachments/assets/5c3ff16a-7470-408c-87de-a6a1aabd33b3)
+## Two Modes of Operation
 
+### Classic Export
 
-
-## Requirements
-
-- Python > 3.6
-- Claude Code running on Linux or WSL
-- Access to `~/.claude/projects/` directory
-
-## Quick Start
+Exports to `~/claude_sessions/exports/` with timestamped directories. This is the original behavior and remains the default.
 
 ```bash
-# Clone or download this repository
-git clone https://github.com/jimmc414/cctrace.git
-cd cctrace
-
-# Run the installer
-chmod +x setup.sh
-./setup.sh
-
-# Use in Claude Code
-/user:export
-# Or
-/export
+python3 export_claude_session.py
 ```
+
+Produces:
+```
+~/claude_sessions/exports/2025-07-02_16-45-00_f33cdb42/
+├── raw_messages.jsonl     # Original session data
+├── conversation_full.md   # Human-readable markdown
+├── conversation_full.xml  # Structured XML with full metadata
+├── session_info.json      # Session metadata
+└── summary.txt            # Statistics
+```
+
+### Portable Export
+
+Exports to `.claude-sessions/<name>/` within your repository. Designed to be committed and shared.
+
+```bash
+python3 export_claude_session.py --in-repo --export-name my-session
+```
+
+Produces:
+```
+.claude-sessions/my-session/
+├── .cctrace-manifest.json    # Required for import
+├── RENDERED.md               # Renders on GitHub
+├── session/
+│   ├── main.jsonl            # Session transcript
+│   ├── file-history/         # File snapshots from undo history
+│   ├── todos.json            # Todo state
+│   └── plan.md               # Plan file if present
+├── config/
+│   ├── commands/             # Slash commands
+│   ├── skills/               # Skills
+│   └── ...                   # Other .claude/ config
+└── [legacy files]            # For backwards compatibility
+```
+
+The portable export includes everything needed to resume the session: conversation history, file snapshots, todos, plans, and project-specific Claude Code configuration.
+
+## Importing a Session
+
+Someone clones your repo and wants to continue your session:
+
+```bash
+python3 import_session.py .claude-sessions/my-session/
+claude -c  # Lists available sessions, including the imported one
+```
+
+### What Import Does
+
+1. Validates the export has a `.cctrace-manifest.json`
+2. Creates a pre-import snapshot for recovery
+3. Generates a new session ID (your local sessions remain unaffected)
+4. Rewrites internal UUIDs while preserving message threading
+5. Updates `cwd` paths to the local project directory
+6. Copies session file to `~/.claude/projects/<normalized-path>/`
+7. Imports auxiliary data (file-history, todos, plans)
+8. Imports config files (commands, skills, hooks, agents, rules)
+
+### What Import Preserves
+
+Certain fields are cryptographically signed or tied to Anthropic's API and must not be modified:
+
+- `message.id` (Anthropic message ID)
+- `requestId` (Anthropic request ID)
+- `signature` in thinking blocks
+- `tool_use.id` (tool invocation ID)
+
+These are left untouched. Only the session-local identifiers (`sessionId`, `uuid`, `parentUuid`, `agentId`, `cwd`) are regenerated.
+
+### Restoring After Import
+
+If an import causes problems:
+
+```bash
+python3 restore_backup.py           # Show snapshot info
+python3 restore_backup.py --restore # Restore pre-import state
+```
+
+Restore requires typing "RESTORE" to confirm. The `--yes` flag bypasses this for automation.
+
+## Path Normalization
+
+Claude Code normalizes project paths for storage:
+
+| Character | Replacement |
+|-----------|-------------|
+| `/` | `-` |
+| `\` | `-` |
+| `:` | `-` |
+| `.` | `-` |
+| `_` | `-` |
+
+Unix paths are prefixed with `-`. Windows paths are not.
+
+Examples:
+- `/mnt/c/python/my_project` becomes `-mnt-c-python-my-project`
+- `C:\Users\dev\project` becomes `C-Users-dev-project`
+
+cctrace replicates this normalization to locate and import sessions correctly.
+
+## Backwards Compatibility
+
+Existing cctrace users are unaffected:
+
+- The default export behavior is unchanged
+- All original output files are still generated
+- Portable exports include the legacy files alongside the new structure
+- The `--in-repo` flag is required to use the new portable format
 
 ## Installation
 
-### Automated Installation
+Requires Python 3.6+ and access to `~/.claude/projects/`.
 
-1. Run the installation script:
-   ```bash
-   ./setup.sh
-   ```
+```bash
+git clone https://github.com/jimmc414/cctrace.git
+cd cctrace
+./setup.sh
+```
 
-2. The installer will:
-   - Create necessary directories
-   - Copy files to appropriate locations
-   - Set up the slash command
-   - Verify the installation
+Or manually:
 
-### Manual Installation
-
-1. Copy the export script:
-   ```bash
-   mkdir -p ~/claude_sessions
-   cp export_claude_session.py ~/claude_sessions/
-   chmod +x ~/claude_sessions/export_claude_session.py
-   ```
-
-2. Install the slash command:
-   ```bash
-   mkdir -p ~/.claude/commands
-   cp export.md ~/.claude/commands/
-   ```
+```bash
+cp export_claude_session.py ~/claude_sessions/
+cp import_session.py ~/claude_sessions/
+cp restore_backup.py ~/claude_sessions/
+mkdir -p ~/.claude/commands
+cp .claude/commands/*.md ~/.claude/commands/
+```
 
 ## Usage
 
-### Using the Slash Command (Recommended)
-
-In any Claude Code session, simply type:
-```
-/user:export
-```
-or 
-```
-/export
-```
-
-This will:
-1. Automatically detect your current session
-2. Export all conversation data
-3. Display a summary directly in Claude Code
-
-### Using the Command Line
+### Export
 
 ```bash
-# Export current active session
-python3 ~/claude_sessions/export_claude_session.py
+# Classic export to ~/claude_sessions/exports/
+python3 export_claude_session.py
 
-# Export with custom options
-python3 ~/claude_sessions/export_claude_session.py --max-age 600
+# Portable export to .claude-sessions/
+python3 export_claude_session.py --in-repo --export-name feature-work
 
-# Export specific session by ID
-python3 ~/claude_sessions/export_claude_session.py --session-id f33cdb42-0a41-40d4-91eb-c89c109af38a
+# Export specific session
+python3 export_claude_session.py --session-id f33cdb42-0a41-40d4-91eb-c89c109af38a
 
-# Export to custom directory
-python3 ~/claude_sessions/export_claude_session.py --output-dir /path/to/exports
+# Adjust active session detection window (default: 300 seconds)
+python3 export_claude_session.py --max-age 600
 ```
 
-### Command Line Options
+### Import
 
-- `--session-id <uuid>`: Export a specific session by ID
-- `--max-age <seconds>`: Set the maximum age for active session detection (default: 300)
-- `--output-dir <path>`: Specify custom output directory
-- `--format <md|xml|all>`: Choose output format (default: all)
-- `--no-copy-to-cwd`: Do not copy export to current directory
+```bash
+# Import from local export
+python3 import_session.py .claude-sessions/my-session/
 
-## Export Contents
+# Skip config file import
+python3 import_session.py .claude-sessions/my-session/ --skip-config
 
-Each export creates a timestamped directory containing:
+# Skip auxiliary files (file-history, todos, plans)
+python3 import_session.py .claude-sessions/my-session/ --skip-auxiliary
 
-```
-~/claude_sessions/exports/2025-07-02_16-45-00_f33cdb42/
-├── session_info.json      # Complete session metadata including SESSION ID
-├── conversation_full.md   # Human-readable conversation with all content
-├── conversation_full.xml  # Fully labeled XML with complete metadata
-├── raw_messages.jsonl     # Original JSONL data with all fields
-└── summary.txt            # Quick overview with session ID and statistics
+# Non-interactive mode
+python3 import_session.py .claude-sessions/my-session/ --non-interactive
 ```
 
-### Detailed File Contents
+### Slash Commands
 
-#### **session_info.json** - Complete Session Metadata
-Contains ALL session metadata including:
-- **Session ID** (unique identifier for your chat session)
-- Project directory path
-- Start and end timestamps
-- Total message counts by type
-- Models used
-- Token usage statistics
+If installed to `~/.claude/commands/`:
 
-Example:
-```json
-{
-  "session_id": "f33cdb42-0a41-40d4-91eb-c89c109af38a",
-  "project_dir": "/mnt/c/python/myproject",
-  "start_time": "2025-07-02T20:06:59.614Z",
-  "end_time": "2025-07-02T21:39:11.037Z",
-  "total_messages": 145,
-  "user_messages": 58,
-  "assistant_messages": 87,
-  "tool_uses": 42,
-  "models_used": ["claude-opus-4-20250514"]
-}
+```
+/export-session [name]    # Portable export
+/import-session <path>    # Import
+/restore-backup           # Restore from snapshot
 ```
 
-#### **conversation_full.xml** - Complete XML Export
-Comprehensive XML format with FULL metadata labeling:
-- **Session-level metadata**: Session ID, version, timestamps, working directory
-- **Message-level metadata**: 
-  - UUID and parent-UUID for message relationships
-  - Event types and request IDs
-  - Role (user/assistant) and model information
-- **Content preservation**:
-  - Text messages with proper encoding
-  - Thinking blocks with cryptographic signatures
-  - Tool uses with complete input/output data
-  - Tool execution metadata (response codes, duration, bytes)
-- **Token usage per message**: Input/output tokens, cache tokens, service tier
+## Session Detection
 
-Example XML structure:
-```xml
-<claude-session xmlns="https://claude.ai/session-export/v1" export-version="1.0">
-  <metadata>
-    <session-id>f33cdb42-0a41-40d4-91eb-c89c109af38a</session-id>
-    <working-directory>/mnt/c/python/myproject</working-directory>
-    <start-time>2025-07-02T20:06:59.614Z</start-time>
-    <export-time>2025-07-02T22:15:00.000Z</export-time>
-  </metadata>
-  <messages>
-    <message uuid="492b16e4-af89-408f-b144-ae571d4047b5" 
-             parent-uuid="null" 
-             timestamp="2025-07-02T20:06:59.614Z">
-      <role>user</role>
-      <content>
-        <text>Your message here</text>
-      </content>
-    </message>
-    <message uuid="6892a3b3-63cf-4052-8f3f-850dca83d50c" 
-             parent-uuid="492b16e4-af89-408f-b144-ae571d4047b5"
-             timestamp="2025-07-02T20:07:07.357Z">
-      <role>assistant</role>
-      <model>claude-opus-4-20250514</model>
-      <content>
-        <thinking signature="Es0ICkYIBRgCKkCeXs4...">
-          Internal reasoning content
-        </thinking>
-        <text>Assistant response</text>
-        <tool-use id="toolu_01ABC..." name="Bash">
-          <input>{"command": "ls -la", "description": "List files"}</input>
-        </tool-use>
-      </content>
-      <usage>
-        <input-tokens>1500</input-tokens>
-        <output-tokens>750</output-tokens>
-        <cache-creation-tokens>0</cache-creation-tokens>
-        <service-tier>standard</service-tier>
-      </usage>
-    </message>
-  </messages>
-</claude-session>
-```
+When multiple sessions exist for a project, cctrace identifies the correct one by:
 
-#### **conversation_full.md** - Human-Readable Export
-Markdown format including:
-- Session ID prominently displayed at the top
-- All user messages and assistant responses
-- Collapsible thinking/reasoning blocks
-- Tool usage with inputs and outputs
-- Timestamps for each interaction
+1. Finding all `.jsonl` files in the project's Claude storage directory
+2. Filtering to sessions modified within `--max-age` seconds
+3. If running inside Claude Code, correlating the parent PID with session activity
+4. Falling back to the most recently modified session
 
-#### **raw_messages.jsonl** - Original Data
-Complete, unmodified JSONL file containing:
-- Every field from the original Claude Code session
-- Session IDs, UUIDs, parent relationships
-- All metadata exactly as stored by Claude Code
-- Perfect for programmatic processing or analysis
+## Output Formats
 
-#### **summary.txt** - Quick Reference
-Plain text summary featuring:
-- Session ID for easy reference
+### JSONL (raw_messages.jsonl, session/main.jsonl)
+
+The original session format. Each line is a JSON object representing a message or event. Contains all fields exactly as stored by Claude Code.
+
+### Markdown (conversation_full.md, RENDERED.md)
+
+Human-readable conversation with:
+- Timestamps per message
+- User and assistant messages clearly delineated
+- Thinking blocks in collapsible `<details>` sections
+- Tool uses with JSON inputs and results
+
+RENDERED.md includes a header with session metadata and is formatted for GitHub rendering.
+
+### XML (conversation_full.xml)
+
+Structured format preserving:
+- Message hierarchy via UUID/parent-UUID relationships
+- Token usage per message
+- Tool execution metadata (response codes, duration)
+- Thinking block signatures
+
+### Manifest (.cctrace-manifest.json)
+
+Required for import. Contains:
+- cctrace version
+- Original session ID and slug
 - Export timestamp
-- Key statistics
-- File locations
+- Original environment context (user, platform, paths)
+- Inventory of exported files
 
-### Export Formats
+## File Locations
 
-By default, the tool exports **both** Markdown and XML formats to give you maximum flexibility.
+| Path | Purpose |
+|------|---------|
+| `~/.claude/projects/<path>/` | Claude Code session storage |
+| `~/claude_sessions/exports/` | Classic export destination |
+| `.claude-sessions/` | Portable export destination (in repo) |
+| `~/.claude-session-imports/` | Import logs and snapshots |
+| `~/.claude/commands/` | User slash commands |
 
-#### Markdown (`--format md`)
-Provides a clean, human-readable view of your conversation with collapsible sections for internal reasoning. Perfect for reviewing conversations and sharing with others.
+## Limitations
 
-#### XML (`--format xml`)
-Preserves all available data fields in a structured format:
-- Session metadata and statistics
-- Message hierarchy with UUID relationships
-- Complete tool usage information including execution times and response codes
-- Thinking blocks with cryptographic signatures
-- All token usage statistics
-- Suitable for XSLT transformations and automated processing
+- Sessions are one-way portable: you can export and import, but there's no merge or sync
+- File-history snapshots reference files by content hash; the original paths are not preserved
+- Import generates new UUIDs, so the imported session is a copy, not the original
+- Large sessions (500+ messages) produce large RENDERED.md files that may be slow to render on GitHub
 
-#### All Formats (`--format all`) - **Default**
-Generates both Markdown and XML outputs in the same export, giving you the best of both worlds:
-- Human-readable Markdown for easy review
-- Machine-parseable XML with complete data preservation
+## Tests
 
-## Auto-Copy to Working Directory
+```bash
+python3 -m pytest tests/ -v
+```
 
-By default, the export tool automatically copies the complete export folder to your current working directory with the name `claude_export_YYYY-MM-DD_HH-MM-SS_sessionid`. This makes it easy to:
-- Include exports in your project repository
-- Access exports without navigating to `~/claude_sessions/exports/`
-- Keep exports with the relevant project code
+33 tests covering manifest validation, UUID regeneration, path normalization, and restore functionality.
 
-### Disabling Auto-Copy
+## License
 
-You can disable this feature in three ways:
-
-1. **Command line flag:**
-   ```bash
-   python3 export_claude_session.py --no-copy-to-cwd
-   ```
-
-2. **Environment variable:**
-   ```bash
-   export CLAUDE_EXPORT_COPY_TO_CWD=false
-   python3 export_claude_session.py
-   ```
-
-3. **In your shell configuration:**
-   ```bash
-   # Add to ~/.bashrc or ~/.zshrc
-   export CLAUDE_EXPORT_COPY_TO_CWD=false
-   ```
-
-The copied folders are automatically excluded from git via the `.gitignore` pattern `claude_export_*/`.
-
-## How It Works
-
-### Session Detection Process
-
-1. **Project Mapping**: Converts your current directory to Claude's naming convention
-2. **Session Discovery**: Finds all JSONL files in `~/.claude/projects/<project-name>/`
-3. **Active Session Detection**: Identifies sessions modified within the last 5 minutes
-4. **PID Validation**: When multiple active sessions exist:
-   - Detects the parent Claude process PID
-   - Creates a temporary marker file
-   - Identifies which session file responds to the marker
-   - Ensures the correct session is exported
-
-### Multiple Concurrent Sessions
-
-The tool handles multiple Claude Code sessions running in the same directory by:
-- Using process hierarchy to identify the calling Claude instance
-- Employing file activity detection to correlate sessions
-- Providing clear feedback about which session is being exported
-- Falling back gracefully when automatic detection isn't possible
-
-## Troubleshooting
-
-### "No Claude Code sessions found"
-- Ensure you're running from a directory with active Claude Code sessions
-- Check that `~/.claude/projects/` exists and contains your project
-
-### "Could not identify specific session"
-- The tool will default to the most recently active session
-- Use `--session-id` to manually specify a session
-- Ensure the session file has been recently modified
-
-### Permission Errors
-- Verify you have read access to `~/.claude/projects/`
-- Ensure write permissions for the export directory
-
-### Session Not Updating
-- Claude Code writes to JSONL files in real-time
-- If a session appears stale, try sending a message to trigger an update
-
-
-### Development
-
-The tool uses only Python standard library modules, making it dependency-free and easy to deploy.
-
-Key functions:
-- `get_parent_claude_pid()`: Detects if running inside Claude Code
-- `identify_current_session()`: Correlates process with session file
-- `parse_jsonl_file()`: Extracts and processes conversation data
-- `format_message_markdown()`: Converts messages to readable format
+MIT
